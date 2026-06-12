@@ -37,12 +37,16 @@ const generateRandomJobs = (locationName) => {
     const salary = salaries[Math.floor(Math.random() * salaries.length)];
     const description = descriptions[Math.floor(Math.random() * descriptions.length)];
     
+    const jobTypes = ["Full Time", "Part Time", "Contract"];
+    const jobType = jobTypes[Math.floor(Math.random() * jobTypes.length)];
+    
     jobs.push({
       title: role,
       company: company,
       location: locationName,
       salary: salary,
-      description: description
+      description: description,
+      jobType: jobType
     });
   }
   

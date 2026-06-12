@@ -1,4 +1,5 @@
-import { useState } from "react";
+import React from "react";
+import ApplicantsList from "./ApplicantsList";
 
 const formatSalary = (val) => {
   const num = Number(val);
@@ -14,13 +15,23 @@ const formatSalary = (val) => {
   return `$${num}`;
 };
 
-function JobDetails({ job, onClose }) {
-  const [applied, setApplied] = useState(false);
-
+function JobDetails({ job, onClose, user, onApplyClick, hasApplied, isSaved, onToggleSave }) {
   if (!job) return null;
+
+  const isRecruiter = user?.role === "recruiter";
 
   return (
     <div className="job-details-panel">
+      {!isRecruiter && (
+        <button
+          type="button"
+          className={`details-save-star ${isSaved ? "saved" : ""}`}
+          onClick={onToggleSave}
+          aria-label={isSaved ? "Unsave Job" : "Save Job"}
+        >
+          {isSaved ? "★" : "☆"}
+        </button>
+      )}
       <button className="close-btn" onClick={onClose} aria-label="Close Details">
         ✕
       </button>
@@ -37,6 +48,10 @@ function JobDetails({ job, onClose }) {
           <span className="meta-value">{job.location}</span>
         </div>
         <div className="meta-item">
+          <span className="meta-label">JOB TYPE</span>
+          <span className="meta-value font-orange">{job.jobType || "Full Time"}</span>
+        </div>
+        <div className="meta-item">
           <span className="meta-label">SALARY</span>
           <span className="meta-value">{formatSalary(job.salary)}</span>
         </div>
@@ -49,34 +64,41 @@ function JobDetails({ job, onClose }) {
         </div>
       </div>
 
-      <div className="details-footer">
-        <button
-          className={`apply-btn ${applied ? "applied" : ""}`}
-          onClick={() => setApplied(true)}
-          disabled={applied}
-        >
-          {applied ? (
-            <>
-              COMPLETED
-              <svg
-                className="btn-icon"
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="#000000"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-              </svg>
-            </>
-          ) : (
-            "APPLY NOW"
-          )}
-        </button>
-      </div>
+      {isRecruiter ? (
+        <div className="details-applications-section">
+          <ApplicantsList jobId={job._id} />
+        </div>
+      ) : (
+        <div className="details-footer">
+          <button
+            type="button"
+            className={`apply-btn ${hasApplied ? "applied" : ""}`}
+            onClick={onApplyClick}
+            disabled={hasApplied}
+          >
+            {hasApplied ? (
+              <>
+                COMPLETED
+                <svg
+                  className="btn-icon"
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="#000000"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                </svg>
+              </>
+            ) : (
+              "APPLY NOW"
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

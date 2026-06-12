@@ -1,12 +1,52 @@
 import axios from "axios";
 
-const API_URL = "http://localhost:5000/api/jobs";
+const API = axios.create({
+  baseURL: "http://localhost:5000/api",
+});
 
-export const getJobs = () => axios.get(API_URL);
+// Automatically inject JWT token into all outgoing requests if it exists in localStorage
+API.interceptors.request.use((config) => {
+  const token = localStorage.getItem("hirespace_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
-export const createJob = (jobData) => axios.post(API_URL, jobData);
+// Auth endpoints
+export const login = (credentials) => API.post("/auth/login", credentials);
+export const register = (credentials) => API.post("/auth/register", credentials);
+export const getMe = () => API.get("/auth/me");
+export const updateProfile = (profileData) => API.post("/auth/profile", profileData);
+export const resetPassword = (credentials) => API.post("/auth/reset-password", credentials);
 
-export const updateJob = (id, jobData) =>
-  axios.put(`${API_URL}/${id}`, jobData);
+// Job endpoints
+export const getJobs = (filters = {}) => {
+  const params = {};
+  if (filters.search) params.search = filters.search;
+  if (filters.location) params.location = filters.location;
+  if (filters.minSalary) params.minSalary = filters.minSalary;
+  if (filters.jobType) params.jobType = filters.jobType;
+  if (filters.page) params.page = filters.page;
+  if (filters.limit) params.limit = filters.limit;
+  if (filters.sortBy) params.sortBy = filters.sortBy;
+  if (filters.sortOrder) params.sortOrder = filters.sortOrder;
+  return API.get("/jobs", { params });
+};
+export const getJobById = (id) => API.get(`/jobs/${id}`);
+export const createJob = (jobData) => API.post("/jobs", jobData);
+export const updateJob = (id, jobData) => API.put(`/jobs/${id}`, jobData);
+export const deleteJob = (id) => API.delete(`/jobs/${id}`);
 
-export const deleteJob = (id) => axios.delete(`${API_URL}/${id}`);
+// Recycle Bin & Applications
+export const getDeletedJobs = () => API.get("/jobs/deleted");
+export const restoreJob = (id) => API.put(`/jobs/${id}/restore`, {});
+export const permanentDeleteJob = (id) => API.delete(`/jobs/${id}/permanent`);
+export const applyToJob = (id, applicationData) => API.post(`/jobs/${id}/apply`, applicationData);
+export const getJobApplications = (id) => API.get(`/jobs/${id}/applications`);
+export const getAppliedJobIds = () => API.get("/jobs/applied");
+export const getSavedJobs = () => API.get("/jobs/saved");
+export const saveJob = (id) => API.post(`/jobs/${id}/save`);
+export const unsaveJob = (id) => API.delete(`/jobs/${id}/save`);
+
+export default API;

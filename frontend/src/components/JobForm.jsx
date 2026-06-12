@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from "react";
+import CustomSelect from "./CustomSelect";
 
 function JobForm({ onAddJob, editingJob, onUpdateJob, onCancelEdit }) {
   const [formData, setFormData] = useState({
@@ -7,17 +8,19 @@ function JobForm({ onAddJob, editingJob, onUpdateJob, onCancelEdit }) {
     company: "",
     location: "",
     salary: "",
+    jobType: "Full Time",
     description: "",
   });
 
   useEffect(() => {
     if (editingJob) {
       setFormData({
-        title: editingJob.title,
-        company: editingJob.company,
-        location: editingJob.location,
-        salary: editingJob.salary,
-        description: editingJob.description,
+        title: editingJob.title || "",
+        company: editingJob.company || "",
+        location: editingJob.location || "",
+        salary: editingJob.salary || "",
+        jobType: editingJob.jobType || "Full Time",
+        description: editingJob.description || "",
       });
     }
   }, [editingJob]);
@@ -32,6 +35,7 @@ function JobForm({ onAddJob, editingJob, onUpdateJob, onCancelEdit }) {
       company: "",
       location: "",
       salary: "",
+      jobType: "Full Time",
       description: "",
     });
   };
@@ -76,14 +80,27 @@ function JobForm({ onAddJob, editingJob, onUpdateJob, onCancelEdit }) {
         onChange={handleChange}
         required
       />
-      <input
-        type="number"
-        name="salary"
-        placeholder="Salary"
-        value={formData.salary}
-        onChange={handleChange}
-        required
-      />
+      
+      <div className="form-row-split">
+        <input
+          type="number"
+          name="salary"
+          placeholder="Salary"
+          value={formData.salary}
+          onChange={handleChange}
+          required
+        />
+        <CustomSelect
+          value={formData.jobType}
+          onChange={(val) => setFormData({ ...formData, jobType: val })}
+          options={[
+            { value: "Full Time", label: "Full Time" },
+            { value: "Part Time", label: "Part Time" },
+            { value: "Contract", label: "Contract" }
+          ]}
+          placeholder="Full Time"
+        />
+      </div>
 
       <textarea
         name="description"

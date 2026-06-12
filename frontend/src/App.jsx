@@ -4,20 +4,106 @@ import JobForm from "./components/JobForm";
 import JobDetails from "./components/JobDetails";
 import LocationGenerator from "./components/LocationGenerator";
 import CustomSelect from "./components/CustomSelect";
-import { createJob, deleteJob, getJobs, updateJob } from "./services/api";
+import Auth from "./components/Auth";
+import Onboarding from "./components/Onboarding";
+import ProfileCard from "./components/ProfileCard";
+import RecycleBin from "./components/RecycleBin";
+import ApplyModal from "./components/ApplyModal";
+import {
+  createJob,
+  deleteJob,
+  getJobs,
+  updateJob,
+  getMe,
+  getAppliedJobIds,
+  getSavedJobs,
+  saveJob,
+  unsaveJob
+} from "./services/api";
 import "./App.css";
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  
   const [jobs, setJobs] = useState([]);
+  const [appliedJobIds, setAppliedJobIds] = useState([]);
+  
+  // Pagination & Sorting states
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [limit] = useState(5);
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState("desc");
+  const [savedJobs, setSavedJobs] = useState([]);
+  const [showSavedOnly, setShowSavedOnly] = useState(false);
+  const [showAppliedOnly, setShowAppliedOnly] = useState(false);
+  
   const [editingJob, setEditingJob] = useState(null);
-  const [search, setSearch] = useState("");
   const [selectedJob, setSelectedJob] = useState(null);
-  const [stars, setStars] = useState([]);
-  const [fallingStars, setFallingStars] = useState([]);
+  const [search, setSearch] = useState("");
   const [filterLocation, setFilterLocation] = useState("");
   const [filterSalary, setFilterSalary] = useState("");
+  const [filterJobType, setFilterJobType] = useState("");
+  
   const [time, setTime] = useState(new Date());
+  const [isApplyOpen, setIsApplyOpen] = useState(false);
+  
+  const [stars, setStars] = useState([]);
+  const [fallingStars, setFallingStars] = useState([]);
 
+  // Verify Auth on Mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem("hirespace_token");
+      if (token) {
+        try {
+          const res = await getMe();
+          setUser(res.data);
+        } catch (err) {
+          console.error("Session token validation failed:", err);
+          localStorage.removeItem("hirespace_token");
+        }
+      }
+      setAuthChecked(true);
+    };
+    checkAuth();
+  }, []);
+
+  // Sync jobs & applications once logged in and onboarded
+  useEffect(() => {
+    if (user && user.role) {
+      fetchJobs();
+      if (user.role === "applicant") {
+        fetchAppliedJobs();
+        fetchSavedJobs();
+      }
+    }
+  }, [user]);
+
+  // Re-fetch jobs when candidate filters, page, sorting, or filter mode changes
+  useEffect(() => {
+    if (user && user.role === "applicant") {
+      fetchJobs();
+    }
+  }, [search, filterLocation, filterSalary, filterJobType, page, sortBy, sortOrder, showSavedOnly, showAppliedOnly]);
+
+  // Update browser tab name dynamically based on user role
+  useEffect(() => {
+    if (user && user.role) {
+      if (user.role === "recruiter") {
+        document.title = "HireSpace - Recruiter";
+      } else if (user.role === "applicant") {
+        document.title = "HireSpace - Applicant";
+      } else {
+        document.title = "HireSpace";
+      }
+    } else {
+      document.title = "HireSpace";
+    }
+  }, [user]);
+
+  // Live Date/Clock Updates
   useEffect(() => {
     const timer = setInterval(() => {
       setTime(new Date());
@@ -40,15 +126,70 @@ function App() {
   };
 
   const fetchJobs = async () => {
-    const response = await getJobs();
-    setJobs(response.data);
+    try {
+      const params = {
+        search,
+        location: filterLocation,
+        minSalary: filterSalary,
+        jobType: filterJobType
+      };
+
+      if (user && user.role === "applicant") {
+        // Only paginate when in "all" jobs mode (both showSavedOnly and showAppliedOnly are false)
+        if (!showSavedOnly && !showAppliedOnly) {
+          params.page = page;
+          params.limit = limit;
+        }
+        params.sortBy = sortBy;
+        params.sortOrder = sortOrder;
+      }
+
+      const response = await getJobs(params);
+      if (response.data && response.data.jobs) {
+        setJobs(response.data.jobs);
+        setTotalPages(response.data.totalPages || 1);
+      } else {
+        setJobs(Array.isArray(response.data) ? response.data : []);
+        setTotalPages(1);
+      }
+    } catch (err) {
+      console.error("Error fetching jobs:", err);
+    }
   };
 
-  useEffect(() => {
-    fetchJobs();
-  }, []);
+  const fetchAppliedJobs = async () => {
+    try {
+      const res = await getAppliedJobIds();
+      setAppliedJobIds(res.data);
+    } catch (err) {
+      console.error("Error fetching applied jobs list:", err);
+    }
+  };
 
-  // Generate background stars
+  const fetchSavedJobs = async () => {
+    try {
+      const response = await getSavedJobs();
+      setSavedJobs(response.data || []);
+    } catch (err) {
+      console.error("Error fetching saved jobs:", err);
+    }
+  };
+
+  const handleToggleSaveJob = async (jobId) => {
+    try {
+      const isAlreadySaved = savedJobs.some((j) => j._id === jobId);
+      if (isAlreadySaved) {
+        await unsaveJob(jobId);
+      } else {
+        await saveJob(jobId);
+      }
+      await fetchSavedJobs();
+    } catch (err) {
+      console.error("Error toggling save state for job:", err);
+    }
+  };
+
+  // Background stars layout
   useEffect(() => {
     const generatedStars = [];
     for (let i = 0; i < 40; i++) {
@@ -64,12 +205,12 @@ function App() {
     setStars(generatedStars);
   }, []);
 
-  // Periodically generate falling stars heading towards the black hole
+  // Falling stars physics
   useEffect(() => {
     const triggerFallingStar = () => {
       const id = Date.now();
       const startX = Math.random() * 100;
-      const startY = Math.random() * 40; // Upper 40% of the screen
+      const startY = Math.random() * 40;
       
       setFallingStars((prev) => [...prev, { id, startX, startY }]);
       
@@ -82,21 +223,45 @@ function App() {
     };
 
     let timerId = setTimeout(triggerFallingStar, 3000);
-
     return () => clearTimeout(timerId);
   }, []);
 
+  const handleAuthSuccess = (userData) => {
+    setUser(userData);
+  };
+
+  const handleOnboardingComplete = (userData) => {
+    setUser(userData);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("hirespace_token");
+    setUser(null);
+    setJobs([]);
+    setAppliedJobIds([]);
+    setSelectedJob(null);
+    setEditingJob(null);
+  };
+
   const handleAddJob = async (jobData) => {
-    await createJob(jobData);
-    fetchJobs();
+    try {
+      await createJob(jobData);
+      fetchJobs();
+    } catch (err) {
+      console.error("Error posting job:", err);
+    }
   };
 
   const handleDeleteJob = async (id) => {
-    await deleteJob(id);
-    if (selectedJob && selectedJob._id === id) {
-      setSelectedJob(null);
+    try {
+      await deleteJob(id);
+      if (selectedJob && selectedJob._id === id) {
+        setSelectedJob(null);
+      }
+      fetchJobs();
+    } catch (err) {
+      console.error("Error soft-deleting job:", err);
     }
-    fetchJobs();
   };
 
   const handleEditJob = (job) => {
@@ -104,12 +269,16 @@ function App() {
   };
 
   const handleUpdateJob = async (id, jobData) => {
-    await updateJob(id, jobData);
-    setEditingJob(null);
-    if (selectedJob && selectedJob._id === id) {
-      setSelectedJob({ ...selectedJob, ...jobData });
+    try {
+      await updateJob(id, jobData);
+      setEditingJob(null);
+      if (selectedJob && selectedJob._id === id) {
+        setSelectedJob({ ...selectedJob, ...jobData });
+      }
+      fetchJobs();
+    } catch (err) {
+      console.error("Error updating job:", err);
     }
-    fetchJobs();
   };
 
   const handleCancelEdit = () => {
@@ -117,21 +286,110 @@ function App() {
   };
 
   const handleGenerateLocationJobs = async (mockJobs, detectedLocation) => {
-    for (const jobData of mockJobs) {
-      await createJob(jobData);
+    try {
+      for (const jobData of mockJobs) {
+        await createJob(jobData);
+      }
+      await fetchJobs();
+      setSearch(detectedLocation);
+    } catch (err) {
+      console.error("Error saving generated jobs:", err);
     }
-    await fetchJobs();
-    setSearch(detectedLocation);
   };
 
-  const uniqueLocations = Array.from(new Set(jobs.map((job) => job.location))).filter(Boolean);
+  const handleApplySuccess = () => {
+    if (selectedJob) {
+      setAppliedJobIds((prev) => [...prev, selectedJob._id]);
+    }
+    setIsApplyOpen(false);
+  };
 
-  const filteredJobs = jobs.filter((job) => {
+  // Auth Routing Check
+  if (!authChecked) {
+    return (
+      <div className="app-loading-screen">
+        <div className="cosmic-spinner"></div>
+        <p>CONNECTING TO THE COSMIC DATABASE...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="app">
+        {/* Twinkling background */}
+        <div className="stars-container">
+          {stars.map((star) => (
+            <div
+              key={star.id}
+              className="star"
+              style={{
+                left: star.left,
+                top: star.top,
+                width: star.size,
+                height: star.size,
+                animationDelay: star.delay,
+                animationDuration: star.duration
+              }}
+            />
+          ))}
+        </div>
+        <Auth onAuthSuccess={handleAuthSuccess} />
+      </div>
+    );
+  }
+
+  if (user && !user.role) {
+    return (
+      <div className="app">
+        <div className="stars-container">
+          {stars.map((star) => (
+            <div
+              key={star.id}
+              className="star"
+              style={{
+                left: star.left,
+                top: star.top,
+                width: star.size,
+                height: star.size,
+                animationDelay: star.delay,
+                animationDuration: star.duration
+              }}
+            />
+          ))}
+        </div>
+        <Onboarding user={user} onOnboardingComplete={handleOnboardingComplete} />
+      </div>
+    );
+  }
+
+  // Active user role checking
+  const isRecruiter = user.role === "recruiter";
+
+  // Filter jobs based on active role context
+  let displayJobs = jobs;
+  if (user && user.role === "applicant") {
+    if (showSavedOnly && showAppliedOnly) {
+      const savedIds = savedJobs.map((j) => j._id);
+      displayJobs = jobs.filter((j) => savedIds.includes(j._id) && appliedJobIds.includes(j._id));
+    } else if (showSavedOnly) {
+      displayJobs = savedJobs;
+    } else if (showAppliedOnly) {
+      displayJobs = jobs.filter((j) => appliedJobIds.includes(j._id));
+    }
+  } else if (isRecruiter) {
+    displayJobs = jobs.filter((j) => j.recruiterId === user._id && !j.isDeleted);
+  } else {
+    displayJobs = jobs.filter((j) => !j.isDeleted);
+  }
+
+  const filteredJobs = displayJobs.filter((job) => {
     const matchesSearch = `${job.title} ${job.company} ${job.location}`
       .toLowerCase()
       .includes(search.toLowerCase());
       
     const matchesLocation = filterLocation ? job.location === filterLocation : true;
+    const matchesJobType = filterJobType ? job.jobType === filterJobType : true;
     
     let matchesSalary = true;
     if (filterSalary) {
@@ -144,8 +402,10 @@ function App() {
       }
     }
     
-    return matchesSearch && matchesLocation && matchesSalary;
+    return matchesSearch && matchesLocation && matchesSalary && matchesJobType;
   });
+
+  const uniqueLocations = Array.from(new Set(displayJobs.map((job) => job.location))).filter(Boolean);
 
   const locationOptions = [
     { value: "", label: "ALL LOCATIONS" },
@@ -162,6 +422,13 @@ function App() {
     { value: "600000-1200000", label: "$600K - $1.2M" },
     { value: "1200000-1800000", label: "$1.2M - $1.8M" },
     { value: "1800000-99999999", label: "$1.8M+" }
+  ];
+
+  const jobTypeOptions = [
+    { value: "", label: "ALL JOB TYPES" },
+    { value: "Full Time", label: "FULL TIME" },
+    { value: "Part Time", label: "PART TIME" },
+    { value: "Contract", label: "CONTRACT" }
   ];
 
   return (
@@ -184,7 +451,7 @@ function App() {
         ))}
       </div>
 
-      {/* Spaghettified falling stars drawn into the black hole */}
+      {/* Spaghettified falling stars */}
       <div className="falling-stars-container">
         {fallingStars.map((fs) => (
           <div
@@ -204,7 +471,9 @@ function App() {
 
       <header className="top-header">
         <div className="header-info">
-          <h1>HIRESPACE</h1>
+          <h1>
+            HIRESPACE
+          </h1>
           <p>
             A clean workspace to post, discover, and manage career opportunities.
           </p>
@@ -226,21 +495,22 @@ function App() {
               ))}
             </div>
           </div>
-          <LocationGenerator onGenerate={handleGenerateLocationJobs} />
+          <ProfileCard user={user} onLogout={handleLogout} />
         </div>
       </header>
 
       <main className="main-layout">
+        {/* LEFT COLUMN: Job Search & Listings (for both Recruiter & Applicant) */}
         <section className="jobs-panel">
           <div className="jobs-top">
             <div>
-              {search || filterLocation || filterSalary ? (
+              {search || filterLocation || filterSalary || filterJobType ? (
                 <>
-                  <h2>AVAILABLE JOBS</h2>
+                  <h2>{isRecruiter ? "MY POSTED JOBS" : "AVAILABLE JOBS"}</h2>
                   <p>{filteredJobs.length} JOB OPENINGS FOUND</p>
                 </>
               ) : (
-                <h2>SEARCH FOR JOBS</h2>
+                <h2>{isRecruiter ? "MY POSTED JOBS" : "SEARCH FOR JOBS"}</h2>
               )}
             </div>
 
@@ -249,37 +519,63 @@ function App() {
               type="text"
               placeholder="Search by title, company, location....."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
 
           <div className="jobs-filters">
             <div className="filter-group">
-              <label>LOCATION:</label>
+              <label>LOC:</label>
               <CustomSelect
                 value={filterLocation}
-                onChange={setFilterLocation}
+                onChange={(val) => {
+                  setFilterLocation(val);
+                  setPage(1);
+                }}
                 options={locationOptions}
                 placeholder="ALL LOCATIONS"
               />
             </div>
 
             <div className="filter-group">
-              <label>SALARY RANGE:</label>
+              <label>SALARY:</label>
               <CustomSelect
                 value={filterSalary}
-                onChange={setFilterSalary}
+                onChange={(val) => {
+                  setFilterSalary(val);
+                  setPage(1);
+                }}
                 options={salaryOptions}
                 placeholder="ALL SALARIES"
               />
             </div>
 
-            {(filterLocation || filterSalary) && (
+            {/* Job Type select filter */}
+            <div className="filter-group">
+              <label>TYPE:</label>
+              <CustomSelect
+                value={filterJobType}
+                onChange={(val) => {
+                  setFilterJobType(val);
+                  setPage(1);
+                }}
+                options={jobTypeOptions}
+                placeholder="ALL JOB TYPES"
+              />
+            </div>
+
+            {(filterLocation || filterSalary || filterJobType) && (
               <button
+                type="button"
                 className="clear-filters-btn"
                 onClick={() => {
                   setFilterLocation("");
                   setFilterSalary("");
+                  setFilterJobType("");
+                  setPage(1);
                 }}
               >
                 CLEAR
@@ -287,8 +583,67 @@ function App() {
             )}
           </div>
 
+          {/* Candidates-only Sorting & Saved Jobs Bar */}
+          {!isRecruiter && (
+            <div className="jobs-sub-filters">
+              <div className="sort-group">
+                <label>SORT:</label>
+                <select
+                  value={`${sortBy}-${sortOrder}`}
+                  onChange={(e) => {
+                    const [field, order] = e.target.value.split("-");
+                    setSortBy(field);
+                    setSortOrder(order);
+                    setPage(1);
+                  }}
+                  className="sort-select"
+                >
+                  <option value="createdAt-desc">NEWEST</option>
+                  <option value="createdAt-asc">OLDEST</option>
+                  <option value="salary-desc">SALARY (HIGH - LOW)</option>
+                  <option value="salary-asc">SALARY (LOW - HIGH)</option>
+                  <option value="title-asc">TITLE (A - Z)</option>
+                </select>
+              </div>
+
+              <div className="filter-mode-buttons">
+                <button
+                  type="button"
+                  className={`mode-btn ${(!showSavedOnly && !showAppliedOnly) ? "active" : ""}`}
+                  onClick={() => {
+                    setShowSavedOnly(false);
+                    setShowAppliedOnly(false);
+                    setPage(1);
+                  }}
+                >
+                  ALL
+                </button>
+                <button
+                  type="button"
+                  className={`mode-btn ${showSavedOnly ? "active" : ""}`}
+                  onClick={() => {
+                    setShowSavedOnly(!showSavedOnly);
+                    setPage(1);
+                  }}
+                >
+                  SAVED
+                </button>
+                <button
+                  type="button"
+                  className={`mode-btn ${showAppliedOnly ? "active" : ""}`}
+                  onClick={() => {
+                    setShowAppliedOnly(!showAppliedOnly);
+                    setPage(1);
+                  }}
+                >
+                  APPLIED
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="job-rows">
-            {!(search || filterLocation || filterSalary) ? (
+            {!(search || filterLocation || filterSalary || filterJobType) && !isRecruiter ? (
               <div className="empty-state-container">
                 <p className="empty-text">
                   Start typing to find the best opportunities...
@@ -311,49 +666,113 @@ function App() {
                       <circle cx="12" cy="7" r="4" />
                     </svg>
                   </div>
-                  <h3>{job.title}</h3>
-                  <h4>{job.company}</h4>
+                  <div className="job-row-main-info">
+                    <h3>{job.title}</h3>
+                    <h4>{job.company}</h4>
+                  </div>
+                  <span className="job-row-type-badge">{job.jobType || "Full Time"}</span>
 
-                  <button
-                    className="edit-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditJob(job);
-                    }}
-                  >
-                    EDIT
-                  </button>
+                  {!isRecruiter && savedJobs.some((j) => j._id === job._id) && (
+                    <span className="job-row-saved-badge" title="Saved Job">★</span>
+                  )}
 
-                  <button
-                    className="delete-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteJob(job._id);
-                    }}
-                  >
-                    DELETE
-                  </button>
+                  {isRecruiter && (
+                    <>
+                      <button
+                        type="button"
+                        className="edit-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditJob(job);
+                        }}
+                      >
+                        EDIT
+                      </button>
+
+                      <button
+                        type="button"
+                        className="delete-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteJob(job._id);
+                        }}
+                      >
+                        DELETE
+                      </button>
+                    </>
+                  )}
                 </div>
               ))
             )}
           </div>
+
+          {/* Candidates-only Pagination */}
+          {!isRecruiter && (!showSavedOnly && !showAppliedOnly) && totalPages > 1 && (
+            <div className="pagination-controls">
+              <button
+                type="button"
+                className="pagination-btn"
+                disabled={page === 1}
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              >
+                ◀ PREV
+              </button>
+              <span className="pagination-info">
+                PAGE {page} OF {totalPages}
+              </span>
+              <button
+                type="button"
+                className="pagination-btn"
+                disabled={page === totalPages}
+                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+              >
+                NEXT ▶
+              </button>
+            </div>
+          )}
         </section>
 
+        {/* MIDDLE/RIGHT COLUMN: Job details panel (visible to both roles when selected) */}
         {selectedJob && (
           <JobDetails
             key={selectedJob._id}
             job={selectedJob}
+            user={user}
             onClose={() => setSelectedJob(null)}
+            onApplyClick={() => setIsApplyOpen(true)}
+            hasApplied={appliedJobIds.includes(selectedJob._id)}
+            isSaved={savedJobs.some((j) => j._id === selectedJob._id)}
+            onToggleSave={() => handleToggleSaveJob(selectedJob._id)}
           />
         )}
 
-        <JobForm
-          onAddJob={handleAddJob}
-          editingJob={editingJob}
-          onUpdateJob={handleUpdateJob}
-          onCancelEdit={handleCancelEdit}
-        />
+        {/* RIGHT COLUMN: Action panel (Recruiter: Job Posting Form, Applicant: Local Jobs Generator) */}
+        {isRecruiter ? (
+          <JobForm
+            onAddJob={handleAddJob}
+            editingJob={editingJob}
+            onUpdateJob={handleUpdateJob}
+            onCancelEdit={handleCancelEdit}
+          />
+        ) : (
+          <LocationGenerator onGenerate={handleGenerateLocationJobs} />
+        )}
       </main>
+
+      {/* Recruiter Bottom-Left Recycle Bin */}
+      {isRecruiter && (
+        <RecycleBin onJobsChanged={fetchJobs} />
+      )}
+
+      {/* Applicant Apply Modal */}
+      {isApplyOpen && selectedJob && (
+        <ApplyModal
+          job={selectedJob}
+          user={user}
+          onClose={() => setIsApplyOpen(false)}
+          onApplySuccess={handleApplySuccess}
+        />
+      )}
     </div>
   );
 }

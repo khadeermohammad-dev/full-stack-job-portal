@@ -22,6 +22,25 @@ const jobSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    jobType: {
+      type: String,
+      enum: ["Full Time", "Part Time", "Contract"],
+      default: "Full Time",
+      required: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    recruiterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: false,
+    },
   },
   {
     timestamps: true,
