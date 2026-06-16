@@ -32,6 +32,11 @@ const jobSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    status: {
+      type: String,
+      enum: ["Open", "Closed"],
+      default: "Open",
+    },
     deletedAt: {
       type: Date,
       default: null,

@@ -37,15 +37,18 @@ A full-featured, secure MERN stack job board application implementing a premium 
 
 ### 🔹 B. Recruiter Dashboard & Recycle Bin
 *   **CRUD Postings**: Create, edit, and delete job listings. Changes update the listings on the candidate dashboard in real-time.
+*   **ATS Analytics Dashboard**: Tab view containing statistical blocks (Total, Active, Closed Jobs, Applications count), a Pipeline Funnel Stages chart, Applications per Job bar charts, and a real-time event log feed of recruiter actions.
 *   **Soft Delete & Recycle Bin**: Deleting a job sets `isDeleted: true` and moves it to a floating Recycle Bin. Recruiters can review deleted jobs and select **Restore** or **Delete Permanently**.
 *   **Preference Cache**: Warning overlays before permanent deletion feature a "Don't show this again" checkbox, which stores recruiter preferences inside `localStorage` to bypass future alerts.
-*   **Applicant Tracking**: Selecting a job opens a candidates data table displaying applicant names, contact information, years of experience, cover letters, and single-click resume download links.
+*   **Side-by-Side Candidate Workspace**: Selecting a job details card and clicking the glowing **SHOW APPLICANTS** button launches a fullscreen overlay modal divided into two columns:
+    *   **Left Column (Candidates List)**: Contains a live search input, pipeline stage dropdown filters, a "Select All" candidates checkbox, bulk status transition buttons (Shortlist, Under Review, Reject), and scrolling candidate cards.
+    *   **Right Column (Dossier Drawer)**: Houses candidate profile details (experience, resume download links, cover letter), a pipeline progress transition grid, recruiter note logs (supporting Add, Edit, Delete), and an interview scheduler form.
 
 ### 🔹 C. Candidate Workspace & Applications
 *   **Local Jobs Generator**: Hits `ipapi.co` on startup to locate the candidate's IP coordinates, automatically posting three mock jobs in that city and pre-filtering listings by that location.
 *   **Apply Modal**: Supports entering years of experience, a cover letter, and choosing a document file (resume).
 *   **Flexible Contact Fields**: If the candidate uploads a resume file, contact inputs (Name, Email, Phone) instantly convert to `(Optional)` status and utilize the user's profile info as fallbacks.
-*   **Completed Lock State**: Once a candidate applies to a job, the detail panel footer locks into a disabled **COMPLETED 👍** state to prevent duplicate applications.
+*   **Completed Lock State**: Once a candidate applies to a job, the detail panel footer locks into a disabled **COMPLETED** state to prevent duplicate applications.
 
 ### 🔹 D. Saved Jobs, Pagination & Sorting
 *   **Saved Jobs (Bookmarks)**: Candidates can click the bookmark star (`★` / `☆`) in the top-right corner of the Job Details panel to toggle jobs on/off their saved favorites list.
@@ -170,9 +173,12 @@ A full-featured, secure MERN stack job board application implementing a premium 
 *   `GET /api/jobs/deleted` — Retrieve recruiter's soft-deleted postings *(Recruiter only)*.
 *   `GET /api/jobs/applied` — Retrieve job IDs candidate applied to *(Applicant only)*.
 *   `GET /api/jobs/saved` — Retrieve candidate's saved jobs list *(Applicant only)*.
+*   `GET /api/jobs/analytics` — Retrieve recruiter ATS statistics & funnel charts data *(Recruiter only)*.
+*   `GET /api/jobs/activities` — Retrieve recent recruiter actions history log *(Recruiter only)*.
 *   `GET /api/jobs/:id` — Retrieve a single job's details.
 *   `POST /api/jobs` — Create a new job posting *(Recruiter only)*.
 *   `PUT /api/jobs/:id` — Update job parameters *(Recruiter only)*.
+*   `PUT /api/jobs/:id/status` — Toggle job status (Open / Closed) *(Recruiter only)*.
 *   `DELETE /api/jobs/:id` — Soft-delete job (move to Recycle Bin) *(Recruiter only)*.
 *   `PUT /api/jobs/:id/restore` — Restore soft-deleted job *(Recruiter only)*.
 *   `DELETE /api/jobs/:id/permanent` — Permanently delete job *(Recruiter only)*.
@@ -180,6 +186,13 @@ A full-featured, secure MERN stack job board application implementing a premium 
 ### 📝 Application & Saved Job APIs
 *   `POST /api/jobs/:id/apply` — Apply for a job *(Applicant only)*.
 *   `GET /api/jobs/:id/applications` — List applications for a job *(Recruiter only)*.
+*   `PUT /api/jobs/applications/bulk` — Apply bulk status updates to selected applications *(Recruiter only)*.
+*   `PUT /api/jobs/applications/:appId/status` — Advance candidate pipeline status *(Recruiter only)*.
+*   `POST /api/jobs/applications/:appId/notes` — Add internal note to candidate profile *(Recruiter only)*.
+*   `PUT /api/jobs/applications/:appId/notes/:noteId` — Edit candidate internal note *(Recruiter only)*.
+*   `DELETE /api/jobs/applications/:appId/notes/:noteId` — Delete recruiter comment *(Recruiter only)*.
+*   `POST /api/jobs/applications/:appId/interview` — Schedule/Reschedule interview *(Recruiter only)*.
+*   `DELETE /api/jobs/applications/:appId/interview` — Cancel scheduled interview *(Recruiter only)*.
 *   `POST /api/jobs/:id/save` — Add job to favorites *(Applicant only)*.
 *   `DELETE /api/jobs/:id/save` — Remove job from favorites *(Applicant only)*.
 

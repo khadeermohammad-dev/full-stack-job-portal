@@ -9,6 +9,7 @@ import Onboarding from "./components/Onboarding";
 import ProfileCard from "./components/ProfileCard";
 import RecycleBin from "./components/RecycleBin";
 import ApplyModal from "./components/ApplyModal";
+import ApplicantsList from "./components/ApplicantsList";
 import {
   createJob,
   deleteJob,
@@ -18,7 +19,10 @@ import {
   getAppliedJobIds,
   getSavedJobs,
   saveJob,
-  unsaveJob
+  unsaveJob,
+  updateJobStatus,
+  getRecruiterAnalytics,
+  getRecentActivities
 } from "./services/api";
 import "./App.css";
 
@@ -52,6 +56,13 @@ function App() {
   const [stars, setStars] = useState([]);
   const [fallingStars, setFallingStars] = useState([]);
 
+  // Recruiter Dashboard specific states
+  const [recruiterTab, setRecruiterTab] = useState("overview"); // "overview", "jobs", "post"
+  const [analytics, setAnalytics] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [activeApplicantsJob, setActiveApplicantsJob] = useState(null);
+
   // Verify Auth on Mount
   useEffect(() => {
     const checkAuth = async () => {
@@ -77,6 +88,8 @@ function App() {
       if (user.role === "applicant") {
         fetchAppliedJobs();
         fetchSavedJobs();
+      } else if (user.role === "recruiter") {
+        fetchAnalyticsAndActivities();
       }
     }
   }, [user]);
@@ -88,11 +101,18 @@ function App() {
     }
   }, [search, filterLocation, filterSalary, filterJobType, page, sortBy, sortOrder, showSavedOnly, showAppliedOnly]);
 
+  // Re-fetch analytics when recruiter switches to overview
+  useEffect(() => {
+    if (user && user.role === "recruiter" && recruiterTab === "overview") {
+      fetchAnalyticsAndActivities();
+    }
+  }, [recruiterTab]);
+
   // Update browser tab name dynamically based on user role
   useEffect(() => {
     if (user && user.role) {
       if (user.role === "recruiter") {
-        document.title = "HireSpace - Recruiter";
+        document.title = "HireSpace - Recruiter ATS";
       } else if (user.role === "applicant") {
         document.title = "HireSpace - Applicant";
       } else {
@@ -134,14 +154,18 @@ function App() {
         jobType: filterJobType
       };
 
-      if (user && user.role === "applicant") {
-        // Only paginate when in "all" jobs mode (both showSavedOnly and showAppliedOnly are false)
-        if (!showSavedOnly && !showAppliedOnly) {
-          params.page = page;
-          params.limit = limit;
+      if (user) {
+        if (user.role === "applicant") {
+          // Only paginate when in "all" jobs mode (both showSavedOnly and showAppliedOnly are false)
+          if (!showSavedOnly && !showAppliedOnly) {
+            params.page = page;
+            params.limit = limit;
+          }
+          params.sortBy = sortBy;
+          params.sortOrder = sortOrder;
+        } else if (user.role === "recruiter") {
+          params.showClosed = "true"; // Recruiter retrieves both Open & Closed
         }
-        params.sortBy = sortBy;
-        params.sortOrder = sortOrder;
       }
 
       const response = await getJobs(params);
@@ -175,6 +199,22 @@ function App() {
     }
   };
 
+  const fetchAnalyticsAndActivities = async () => {
+    setDashboardLoading(true);
+    try {
+      const [analyticsRes, activitiesRes] = await Promise.all([
+        getRecruiterAnalytics(),
+        getRecentActivities()
+      ]);
+      setAnalytics(analyticsRes.data);
+      setActivities(activitiesRes.data || []);
+    } catch (err) {
+      console.error("Error fetching recruiter analytics:", err);
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
   const handleToggleSaveJob = async (jobId) => {
     try {
       const isAlreadySaved = savedJobs.some((j) => j._id === jobId);
@@ -186,6 +226,20 @@ function App() {
       await fetchSavedJobs();
     } catch (err) {
       console.error("Error toggling save state for job:", err);
+    }
+  };
+
+  const handleToggleJobStatus = async (jobId, currentStatus) => {
+    const newStatus = currentStatus === "Closed" ? "Open" : "Closed";
+    try {
+      await updateJobStatus(jobId, newStatus);
+      await fetchJobs();
+      if (selectedJob && selectedJob._id === jobId) {
+        setSelectedJob((prev) => ({ ...prev, status: newStatus }));
+      }
+      fetchAnalyticsAndActivities();
+    } catch (err) {
+      console.error("Error toggling job status:", err);
     }
   };
 
@@ -246,6 +300,7 @@ function App() {
   const handleAddJob = async (jobData) => {
     try {
       await createJob(jobData);
+      setRecruiterTab("jobs");
       fetchJobs();
     } catch (err) {
       console.error("Error posting job:", err);
@@ -259,6 +314,7 @@ function App() {
         setSelectedJob(null);
       }
       fetchJobs();
+      fetchAnalyticsAndActivities();
     } catch (err) {
       console.error("Error soft-deleting job:", err);
     }
@@ -266,6 +322,7 @@ function App() {
 
   const handleEditJob = (job) => {
     setEditingJob(job);
+    setRecruiterTab("post");
   };
 
   const handleUpdateJob = async (id, jobData) => {
@@ -275,6 +332,7 @@ function App() {
       if (selectedJob && selectedJob._id === id) {
         setSelectedJob({ ...selectedJob, ...jobData });
       }
+      setRecruiterTab("jobs");
       fetchJobs();
     } catch (err) {
       console.error("Error updating job:", err);
@@ -283,6 +341,7 @@ function App() {
 
   const handleCancelEdit = () => {
     setEditingJob(null);
+    setRecruiterTab("jobs");
   };
 
   const handleGenerateLocationJobs = async (mockJobs, detectedLocation) => {
@@ -302,6 +361,21 @@ function App() {
       setAppliedJobIds((prev) => [...prev, selectedJob._id]);
     }
     setIsApplyOpen(false);
+  };
+
+  const getRelativeTime = (dateInput) => {
+    if (!dateInput) return "Unknown";
+    const date = new Date(dateInput);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
   };
 
   // Auth Routing Check
@@ -370,8 +444,9 @@ function App() {
   let displayJobs = jobs;
   if (user && user.role === "applicant") {
     if (showSavedOnly && showAppliedOnly) {
+      // Changed to OR (||) based on requirement #4: show saved OR applied jobs
       const savedIds = savedJobs.map((j) => j._id);
-      displayJobs = jobs.filter((j) => savedIds.includes(j._id) && appliedJobIds.includes(j._id));
+      displayJobs = jobs.filter((j) => savedIds.includes(j._id) || appliedJobIds.includes(j._id));
     } else if (showSavedOnly) {
       displayJobs = savedJobs;
     } else if (showAppliedOnly) {
@@ -431,6 +506,28 @@ function App() {
     { value: "Contract", label: "CONTRACT" }
   ];
 
+  // Recruiter Dashboard statistics data
+  const funnelStages = analytics?.funnelStages || {
+    "Applied": 0,
+    "Under Review": 0,
+    "Shortlisted": 0,
+    "Interview Scheduled": 0,
+    "Rejected": 0,
+    "Hired": 0
+  };
+
+  const funnelItems = [
+    { label: "Applied", count: funnelStages.Applied, color: "#3a86f0", width: "100%" },
+    { label: "Under Review", count: funnelStages["Under Review"], color: "#00b4d8", width: "90%" },
+    { label: "Shortlisted", count: funnelStages.Shortlisted, color: "#00f5d4", width: "80%" },
+    { label: "Interview Scheduled", count: funnelStages["Interview Scheduled"], color: "#ffb703", width: "70%" },
+    { label: "Hired", count: funnelStages.Hired, color: "#2ec4b6", width: "60%" },
+    { label: "Rejected", count: funnelStages.Rejected, color: "#e63946", width: "50%" },
+  ];
+
+  const appsPerJob = analytics?.applicationsPerJob || [];
+  const maxJobApps = Math.max(...appsPerJob.map(j => j.count), 1);
+
   return (
     <div className="app">
       {/* Background stars */}
@@ -451,47 +548,21 @@ function App() {
         ))}
       </div>
 
-      {/* Spaghettified falling stars */}
-      <div className="falling-stars-container">
-        {fallingStars.map((fs) => (
-          <div
-            key={fs.id}
-            className="falling-star"
-            style={{
-              "--start-x": `${fs.startX}vw`,
-              "--start-y": `${fs.startY}vh`
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="blackhole-container">
-        <img src="/blackholefull.png" alt="Black Hole" className="blackhole" />
-      </div>
-
       <header className="top-header">
         <div className="header-info">
-          <h1>
-            HIRESPACE
-          </h1>
-          <p>
-            A clean workspace to post, discover, and manage career opportunities.
-          </p>
+          <h1>HIRESPACE</h1>
+          <p>A clean workspace to post, discover, and manage career opportunities.</p>
         </div>
         <div className="header-right-section">
           <div className="header-datetime-container">
             <div className="header-clock">
               {formatTime(time).split("").map((char, index) => (
-                <span key={index} className={char === ":" ? "clock-colon" : "clock-digit"}>
-                  {char}
-                </span>
+                <span key={index} className={char === ":" ? "clock-colon" : "clock-digit"}>{char}</span>
               ))}
             </div>
             <div className="header-date">
               {formatDate(time).split("").map((char, index) => (
-                <span key={index} className={char === ":" ? "date-colon" : "date-digit"}>
-                  {char}
-                </span>
+                <span key={index} className={char === ":" ? "date-colon" : "date-digit"}>{char}</span>
               ))}
             </div>
           </div>
@@ -499,268 +570,501 @@ function App() {
         </div>
       </header>
 
-      <main className="main-layout">
-        {/* LEFT COLUMN: Job Search & Listings (for both Recruiter & Applicant) */}
-        <section className="jobs-panel">
-          <div className="jobs-top">
-            <div>
-              {search || filterLocation || filterSalary || filterJobType ? (
-                <>
-                  <h2>{isRecruiter ? "MY POSTED JOBS" : "AVAILABLE JOBS"}</h2>
-                  <p>{filteredJobs.length} JOB OPENINGS FOUND</p>
-                </>
-              ) : (
-                <h2>{isRecruiter ? "MY POSTED JOBS" : "SEARCH FOR JOBS"}</h2>
+      {/* Recruiter Navigation Bar */}
+      {isRecruiter && (
+        <div className="recruiter-nav-tabs">
+          <button
+            type="button"
+            className={`recruiter-nav-tab ${recruiterTab === "overview" ? "active" : ""}`}
+            onClick={() => setRecruiterTab("overview")}
+          >
+            ATS DASHBOARD
+          </button>
+          <button
+            type="button"
+            className={`recruiter-nav-tab ${recruiterTab === "jobs" ? "active" : ""}`}
+            onClick={() => {
+              setRecruiterTab("jobs");
+              fetchJobs();
+            }}
+          >
+            MANAGE JOBS & APPLICANTS
+          </button>
+          <button
+            type="button"
+            className={`recruiter-nav-tab ${recruiterTab === "post" ? "active" : ""}`}
+            onClick={() => {
+              setRecruiterTab("post");
+              setEditingJob(null);
+            }}
+          >
+            POST A JOB
+          </button>
+        </div>
+      )}
+
+      {/* Recruiter ATS Overview Tab */}
+      {isRecruiter && recruiterTab === "overview" && (
+        <div className="ats-dashboard-panel">
+          {dashboardLoading && !analytics ? (
+            <div className="dashboard-loading-state">
+              <div className="cosmic-spinner"></div>
+              <p>LOADING ATS INTELLIGENCE...</p>
+            </div>
+          ) : (
+            <>
+              {/* Stats Tiles Grid */}
+              <div className="stats-tiles-grid">
+                <div className="stats-tile tile-total-jobs">
+                  <span className="tile-title">TOTAL POSTED JOBS</span>
+                  <span className="tile-value">{analytics?.totalJobs || 0}</span>
+                </div>
+                <div className="stats-tile tile-active-jobs">
+                  <span className="tile-title">ACTIVE OPEN JOBS</span>
+                  <span className="tile-value">{analytics?.activeJobs || 0}</span>
+                </div>
+                <div className="stats-tile tile-closed-jobs">
+                  <span className="tile-title">CLOSED JOB POSTINGS</span>
+                  <span className="tile-value">{analytics?.closedJobs || 0}</span>
+                </div>
+                <div className="stats-tile tile-applications">
+                  <span className="tile-title">TOTAL APPLICATIONS</span>
+                  <span className="tile-value">{analytics?.totalApplications || 0}</span>
+                </div>
+                <div className="stats-tile tile-shortlisted">
+                  <span className="tile-title">SHORTLISTED CANDIDATES</span>
+                  <span className="tile-value">{analytics?.shortlistedCandidates || 0}</span>
+                </div>
+              </div>
+
+              {/* Top Performing Job block */}
+              {analytics?.topPerformingJob && (
+                <div className="top-performing-card">
+                  <div className="top-performing-label">TOP PERFORMING LISTING ★</div>
+                  <h4>{analytics.topPerformingJob.title}</h4>
+                  <p>{analytics.topPerformingJob.count} applications received</p>
+                </div>
               )}
-            </div>
 
-            <input
-              className="search-box"
-              type="text"
-              placeholder="Search by title, company, location....."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
+              {/* Charts & Activity Feed Side-by-Side */}
+              <div className="dashboard-middle-section">
+                <div className="charts-card">
+                  <h3>RECRUITMENT ANALYTICS</h3>
+                  
+                  <div className="charts-split">
+                    {/* CSS Funnel stage chart */}
+                    <div className="chart-wrapper">
+                      <h4>Pipeline Stage Funnel</h4>
+                      <div className="funnel-chart">
+                        {funnelItems.map((item) => (
+                          <div className="funnel-stage-wrapper" key={item.label}>
+                            <div
+                              className="funnel-stage-bar"
+                              style={{
+                                width: item.width,
+                                backgroundColor: item.color,
+                                opacity: item.count > 0 ? 1 : 0.25,
+                              }}
+                            >
+                              <span className="funnel-label">{item.label}</span>
+                              <span className="funnel-count">{item.count}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
-          <div className="jobs-filters">
-            <div className="filter-group">
-              <label>LOC:</label>
-              <CustomSelect
-                value={filterLocation}
-                onChange={(val) => {
-                  setFilterLocation(val);
-                  setPage(1);
-                }}
-                options={locationOptions}
-                placeholder="ALL LOCATIONS"
-              />
-            </div>
+                    {/* Applications per Job Chart */}
+                    <div className="chart-wrapper">
+                      <h4>Applications Received Per Job</h4>
+                      <div className="bar-chart-container">
+                        {appsPerJob.length === 0 ? (
+                          <p className="no-data-text">No listings available.</p>
+                        ) : (
+                          appsPerJob.map((job) => (
+                            <div className="bar-chart-row" key={job.title}>
+                              <div className="bar-chart-info">
+                                <span className="bar-chart-title">{job.title}</span>
+                                <span className="bar-chart-val">{job.count} apps</span>
+                              </div>
+                              <div className="bar-chart-track">
+                                <div
+                                  className="bar-chart-fill"
+                                  style={{
+                                    width: `${(job.count / maxJobApps) * 100}%`
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-            <div className="filter-group">
-              <label>SALARY:</label>
-              <CustomSelect
-                value={filterSalary}
-                onChange={(val) => {
-                  setFilterSalary(val);
-                  setPage(1);
-                }}
-                options={salaryOptions}
-                placeholder="ALL SALARIES"
-              />
-            </div>
-
-            {/* Job Type select filter */}
-            <div className="filter-group">
-              <label>TYPE:</label>
-              <CustomSelect
-                value={filterJobType}
-                onChange={(val) => {
-                  setFilterJobType(val);
-                  setPage(1);
-                }}
-                options={jobTypeOptions}
-                placeholder="ALL JOB TYPES"
-              />
-            </div>
-
-            {(filterLocation || filterSalary || filterJobType) && (
-              <button
-                type="button"
-                className="clear-filters-btn"
-                onClick={() => {
-                  setFilterLocation("");
-                  setFilterSalary("");
-                  setFilterJobType("");
-                  setPage(1);
-                }}
-              >
-                CLEAR
-              </button>
-            )}
-          </div>
-
-          {/* Candidates-only Sorting & Saved Jobs Bar */}
-          {!isRecruiter && (
-            <div className="jobs-sub-filters">
-              <div className="sort-group">
-                <label>SORT:</label>
-                <select
-                  value={`${sortBy}-${sortOrder}`}
-                  onChange={(e) => {
-                    const [field, order] = e.target.value.split("-");
-                    setSortBy(field);
-                    setSortOrder(order);
-                    setPage(1);
-                  }}
-                  className="sort-select"
-                >
-                  <option value="createdAt-desc">NEWEST</option>
-                  <option value="createdAt-asc">OLDEST</option>
-                  <option value="salary-desc">SALARY (HIGH - LOW)</option>
-                  <option value="salary-asc">SALARY (LOW - HIGH)</option>
-                  <option value="title-asc">TITLE (A - Z)</option>
-                </select>
+                {/* Recruiter event log feed */}
+                <div className="activity-feed-card">
+                  <h3>RECENT RECRUITER ACTIVITY</h3>
+                  <div className="activity-feed-list">
+                    {activities.length === 0 ? (
+                      <p className="no-activities">No recent actions logged.</p>
+                    ) : (
+                      activities.map((log) => (
+                        <div className="activity-item" key={log._id}>
+                          <div className="activity-dot" />
+                          <div className="activity-content">
+                            <p className="activity-msg">{log.message}</p>
+                            <span className="activity-time">{getRelativeTime(log.timestamp)}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div className="filter-mode-buttons">
-                <button
-                  type="button"
-                  className={`mode-btn ${(!showSavedOnly && !showAppliedOnly) ? "active" : ""}`}
-                  onClick={() => {
-                    setShowSavedOnly(false);
-                    setShowAppliedOnly(false);
-                    setPage(1);
-                  }}
-                >
-                  ALL
-                </button>
-                <button
-                  type="button"
-                  className={`mode-btn ${showSavedOnly ? "active" : ""}`}
-                  onClick={() => {
-                    setShowSavedOnly(!showSavedOnly);
-                    setPage(1);
-                  }}
-                >
-                  SAVED
-                </button>
-                <button
-                  type="button"
-                  className={`mode-btn ${showAppliedOnly ? "active" : ""}`}
-                  onClick={() => {
-                    setShowAppliedOnly(!showAppliedOnly);
-                    setPage(1);
-                  }}
-                >
-                  APPLIED
-                </button>
+              {/* Applications per job posting list table */}
+              <div className="job-applications-summary-card">
+                <h3>JOB POSTINGS LIST ({appsPerJob.length})</h3>
+                <div className="summary-table-wrapper">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Job Title</th>
+                        <th>Location</th>
+                        <th>Salary</th>
+                        <th>Status</th>
+                        <th>Applications</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobs.filter(j => j.recruiterId === user._id && !j.isDeleted).map((job) => {
+                        const appData = appsPerJob.find(a => a.title === job.title) || { count: 0 };
+                        return (
+                          <tr key={job._id}>
+                            <td className="bold-job-title">{job.title}</td>
+                            <td>{job.location}</td>
+                            <td>${Number(job.salary).toLocaleString()}</td>
+                            <td>
+                              <span className={`status-tag ${job.status === "Closed" ? "tag-closed" : "tag-open"}`}>
+                                {job.status || "Open"}
+                              </span>
+                            </td>
+                            <td className="bold-app-count">{appData.count} applications</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="review-applicants-btn"
+                                onClick={() => {
+                                  setSelectedJob(job);
+                                  setRecruiterTab("jobs");
+                                }}
+                              >
+                                Review Candidates
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            </>
           )}
+        </div>
+      )}
 
-          <div className="job-rows">
-            {!(search || filterLocation || filterSalary || filterJobType) && !isRecruiter ? (
-              <div className="empty-state-container">
-                <p className="empty-text">
-                  Start typing to find the best opportunities...
-                </p>
-              </div>
-            ) : filteredJobs.length === 0 ? (
-              <div className="empty-state-container">
-                <p className="empty-text">NO JOBS AVAILABLE</p>
-              </div>
-            ) : (
-              filteredJobs.map((job) => (
-                <div
-                  className={`job-row ${selectedJob && selectedJob._id === job._id ? "active" : ""}`}
-                  key={job._id}
-                  onClick={() => setSelectedJob(job)}
-                >
-                  <div className="job-icon">
-                    <svg className="profile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
+      {/* Main Layout (Manage Jobs / Applicant Search) */}
+      {(!isRecruiter || recruiterTab !== "overview") && (
+        <main className="main-layout">
+          {/* Recruiter Tab "Post" Form view */}
+          {isRecruiter && recruiterTab === "post" ? (
+            <div className="centered-form-wrapper">
+              <JobForm
+                onAddJob={handleAddJob}
+                editingJob={editingJob}
+                onUpdateJob={handleUpdateJob}
+                onCancelEdit={handleCancelEdit}
+              />
+            </div>
+          ) : (
+            <>
+              {/* LEFT COLUMN: Job Listings */}
+              <section className="jobs-panel">
+                <div className="jobs-top">
+                  <div>
+                    {search || filterLocation || filterSalary || filterJobType ? (
+                      <>
+                        <h2>{isRecruiter ? "MY POSTED LISTINGS" : "AVAILABLE JOBS"}</h2>
+                        <p>{filteredJobs.length} JOB OPENINGS FOUND</p>
+                      </>
+                    ) : (
+                      <h2>{isRecruiter ? "MY POSTED LISTINGS" : "SEARCH FOR JOBS"}</h2>
+                    )}
                   </div>
-                  <div className="job-row-main-info">
-                    <h3>{job.title}</h3>
-                    <h4>{job.company}</h4>
+
+                  <input
+                    className="search-box"
+                    type="text"
+                    placeholder="Search by title, company, location....."
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                <div className="jobs-filters">
+                  <div className="filter-group">
+                    <label>LOC:</label>
+                    <CustomSelect
+                      value={filterLocation}
+                      onChange={(val) => {
+                        setFilterLocation(val);
+                        setPage(1);
+                      }}
+                      options={locationOptions}
+                      placeholder="ALL LOCATIONS"
+                    />
                   </div>
-                  <span className="job-row-type-badge">{job.jobType || "Full Time"}</span>
 
-                  {!isRecruiter && savedJobs.some((j) => j._id === job._id) && (
-                    <span className="job-row-saved-badge" title="Saved Job">★</span>
-                  )}
+                  <div className="filter-group">
+                    <label>SALARY:</label>
+                    <CustomSelect
+                      value={filterSalary}
+                      onChange={(val) => {
+                        setFilterSalary(val);
+                        setPage(1);
+                      }}
+                      options={salaryOptions}
+                      placeholder="ALL SALARIES"
+                    />
+                  </div>
 
-                  {isRecruiter && (
-                    <>
-                      <button
-                        type="button"
-                        className="edit-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditJob(job);
-                        }}
-                      >
-                        EDIT
-                      </button>
+                  <div className="filter-group">
+                    <label>TYPE:</label>
+                    <CustomSelect
+                      value={filterJobType}
+                      onChange={(val) => {
+                        setFilterJobType(val);
+                        setPage(1);
+                      }}
+                      options={jobTypeOptions}
+                      placeholder="ALL JOB TYPES"
+                    />
+                  </div>
 
-                      <button
-                        type="button"
-                        className="delete-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteJob(job._id);
-                        }}
-                      >
-                        DELETE
-                      </button>
-                    </>
+                  {(filterLocation || filterSalary || filterJobType) && (
+                    <button
+                      type="button"
+                      className="clear-filters-btn"
+                      onClick={() => {
+                        setFilterLocation("");
+                        setFilterSalary("");
+                        setFilterJobType("");
+                        setPage(1);
+                      }}
+                    >
+                      CLEAR
+                    </button>
                   )}
                 </div>
-              ))
-            )}
-          </div>
 
-          {/* Candidates-only Pagination */}
-          {!isRecruiter && (!showSavedOnly && !showAppliedOnly) && totalPages > 1 && (
-            <div className="pagination-controls">
-              <button
-                type="button"
-                className="pagination-btn"
-                disabled={page === 1}
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-              >
-                ◀ PREV
-              </button>
-              <span className="pagination-info">
-                PAGE {page} OF {totalPages}
-              </span>
-              <button
-                type="button"
-                className="pagination-btn"
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-              >
-                NEXT ▶
-              </button>
-            </div>
+                {/* Candidate sorting and category buttons */}
+                {!isRecruiter && (
+                  <div className="jobs-sub-filters">
+                    <div className="sort-group">
+                      <label>SORT:</label>
+                      <select
+                        value={`${sortBy}-${sortOrder}`}
+                        onChange={(e) => {
+                          const [field, order] = e.target.value.split("-");
+                          setSortBy(field);
+                          setSortOrder(order);
+                          setPage(1);
+                        }}
+                        className="sort-select"
+                      >
+                        <option value="createdAt-desc">NEWEST</option>
+                        <option value="createdAt-asc">OLDEST</option>
+                        <option value="salary-desc">SALARY (HIGH - LOW)</option>
+                        <option value="salary-asc">SALARY (LOW - HIGH)</option>
+                        <option value="title-asc">TITLE (A - Z)</option>
+                      </select>
+                    </div>
+
+                    <div className="filter-mode-buttons">
+                      <button
+                        type="button"
+                        className={`mode-btn ${(!showSavedOnly && !showAppliedOnly) ? "active" : ""}`}
+                        onClick={() => {
+                          setShowSavedOnly(false);
+                          setShowAppliedOnly(false);
+                          setPage(1);
+                        }}
+                      >
+                        ALL
+                      </button>
+                      <button
+                        type="button"
+                        className={`mode-btn ${showSavedOnly ? "active" : ""}`}
+                        onClick={() => {
+                          setShowSavedOnly(!showSavedOnly);
+                          setPage(1);
+                        }}
+                      >
+                        SAVED
+                      </button>
+                      <button
+                        type="button"
+                        className={`mode-btn ${showAppliedOnly ? "active" : ""}`}
+                        onClick={() => {
+                          setShowAppliedOnly(!showAppliedOnly);
+                          setPage(1);
+                        }}
+                      >
+                        APPLIED
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="job-rows">
+                  {!(search || filterLocation || filterSalary || filterJobType) && !isRecruiter ? (
+                    <div className="empty-state-container">
+                      <p className="empty-text">
+                        Start typing to find the best opportunities...
+                      </p>
+                    </div>
+                  ) : filteredJobs.length === 0 ? (
+                    <div className="empty-state-container">
+                      <p className="empty-text">NO JOBS AVAILABLE</p>
+                    </div>
+                  ) : (
+                    filteredJobs.map((job) => (
+                      <div
+                        className={`job-row ${selectedJob && selectedJob._id === job._id ? "active" : ""}`}
+                        key={job._id}
+                        onClick={() => setSelectedJob(job)}
+                      >
+                        <div className="job-icon">
+                          <svg className="profile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                            <circle cx="12" cy="7" r="4" />
+                          </svg>
+                        </div>
+                        <div className="job-row-main-info">
+                          <h3>{job.title}</h3>
+                          <h4>{job.company}</h4>
+                        </div>
+                        
+                        {/* Job status tag for recruiters */}
+                        {isRecruiter && (
+                          <span className={`row-status-tag ${job.status === "Closed" ? "tag-closed" : "tag-open"}`}>
+                            {job.status || "Open"}
+                          </span>
+                        )}
+
+                        <span className="job-row-type-badge">{job.jobType || "Full Time"}</span>
+
+                        {/* Saved star icon positioned correctly on the right corner of job card */}
+                        {!isRecruiter && savedJobs.some((j) => j._id === job._id) && (
+                          <span className="job-row-saved-badge" title="Saved Job">★</span>
+                        )}
+
+                        {/* Recruiter operations: Status toggle, edit, delete */}
+                        {isRecruiter && (
+                          <div className="recruiter-row-actions" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className={`status-toggle-btn ${job.status === "Closed" ? "open-action" : "close-action"}`}
+                              onClick={() => handleToggleJobStatus(job._id, job.status || "Open")}
+                            >
+                              {job.status === "Closed" ? "REOPEN" : "CLOSE"}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="edit-btn"
+                              onClick={() => handleEditJob(job)}
+                            >
+                              EDIT
+                            </button>
+
+                            <button
+                              type="button"
+                              className="delete-btn"
+                              onClick={() => handleDeleteJob(job._id)}
+                            >
+                              DELETE
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Candidate pagination */}
+                {!isRecruiter && (!showSavedOnly && !showAppliedOnly) && totalPages > 1 && (
+                  <div className="pagination-controls">
+                    <button
+                      type="button"
+                      className="pagination-btn"
+                      disabled={page === 1}
+                      onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                    >
+                      ◀ PREV
+                    </button>
+                    <span className="pagination-info">
+                      PAGE {page} OF {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="pagination-btn"
+                      disabled={page === totalPages}
+                      onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                    >
+                      NEXT ▶
+                    </button>
+                  </div>
+                )}
+              </section>
+
+              {/* MIDDLE/RIGHT COLUMN: Job details panel & candidate review list */}
+              {selectedJob ? (
+                <JobDetails
+                  key={selectedJob._id}
+                  job={selectedJob}
+                  user={user}
+                  onClose={() => setSelectedJob(null)}
+                  onApplyClick={() => setIsApplyOpen(true)}
+                  hasApplied={appliedJobIds.includes(selectedJob._id)}
+                  isSaved={savedJobs.some((j) => j._id === selectedJob._id)}
+                  onToggleSave={() => handleToggleSaveJob(selectedJob._id)}
+                  onShowApplicants={(job) => setActiveApplicantsJob(job)}
+                />
+              ) : (
+                <div className="job-details-empty-state">
+                  <p>Select a job from the list to view details and applications.</p>
+                </div>
+              )}
+
+              {/* RIGHT COLUMN: Candidate Location Generator (Applicant view only) */}
+              {!isRecruiter && (
+                <LocationGenerator onGenerate={handleGenerateLocationJobs} />
+              )}
+            </>
           )}
-        </section>
+        </main>
+      )}
 
-        {/* MIDDLE/RIGHT COLUMN: Job details panel (visible to both roles when selected) */}
-        {selectedJob && (
-          <JobDetails
-            key={selectedJob._id}
-            job={selectedJob}
-            user={user}
-            onClose={() => setSelectedJob(null)}
-            onApplyClick={() => setIsApplyOpen(true)}
-            hasApplied={appliedJobIds.includes(selectedJob._id)}
-            isSaved={savedJobs.some((j) => j._id === selectedJob._id)}
-            onToggleSave={() => handleToggleSaveJob(selectedJob._id)}
-          />
-        )}
-
-        {/* RIGHT COLUMN: Action panel (Recruiter: Job Posting Form, Applicant: Local Jobs Generator) */}
-        {isRecruiter ? (
-          <JobForm
-            onAddJob={handleAddJob}
-            editingJob={editingJob}
-            onUpdateJob={handleUpdateJob}
-            onCancelEdit={handleCancelEdit}
-          />
-        ) : (
-          <LocationGenerator onGenerate={handleGenerateLocationJobs} />
-        )}
-      </main>
-
-      {/* Recruiter Bottom-Left Recycle Bin */}
-      {isRecruiter && (
+      {/* Recruiter Recycle Bin */}
+      {isRecruiter && recruiterTab === "jobs" && (
         <RecycleBin onJobsChanged={fetchJobs} />
       )}
 
@@ -772,6 +1076,27 @@ function App() {
           onClose={() => setIsApplyOpen(false)}
           onApplySuccess={handleApplySuccess}
         />
+      )}
+
+      {/* Recruiter Applicants Overlay Modal */}
+      {isRecruiter && activeApplicantsJob && (
+        <div className="modal-overlay" onClick={() => setActiveApplicantsJob(null)}>
+          <div className="applicants-overlay-card" onClick={(e) => e.stopPropagation()}>
+            <div className="applicants-overlay-header">
+              <h2>APPLICANTS FOR {activeApplicantsJob.title.toUpperCase()} at {activeApplicantsJob.company.toUpperCase()}</h2>
+              <button
+                type="button"
+                className="close-overlay-btn"
+                onClick={() => setActiveApplicantsJob(null)}
+              >
+                ✕ CLOSE
+              </button>
+            </div>
+            <div className="applicants-overlay-body">
+              <ApplicantsList jobId={activeApplicantsJob._id} />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

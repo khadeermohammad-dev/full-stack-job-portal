@@ -44,6 +44,24 @@ const applicationSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    status: {
+      type: String,
+      enum: ["Applied", "Under Review", "Shortlisted", "Interview Scheduled", "Rejected", "Hired"],
+      default: "Applied",
+    },
+    notes: [
+      {
+        content: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+      }
+    ],
+    interview: {
+      date: { type: String },
+      time: { type: String },
+      mode: { type: String, enum: ["Online", "Offline"] },
+      meetingLink: { type: String },
+      remarks: { type: String },
+    },
   },
   {
     timestamps: true,

@@ -15,7 +15,7 @@ const formatSalary = (val) => {
   return `$${num}`;
 };
 
-function JobDetails({ job, onClose, user, onApplyClick, hasApplied, isSaved, onToggleSave }) {
+function JobDetails({ job, onClose, user, onApplyClick, hasApplied, isSaved, onToggleSave, onShowApplicants }) {
   if (!job) return null;
 
   const isRecruiter = user?.role === "recruiter";
@@ -65,8 +65,14 @@ function JobDetails({ job, onClose, user, onApplyClick, hasApplied, isSaved, onT
       </div>
 
       {isRecruiter ? (
-        <div className="details-applications-section">
-          <ApplicantsList jobId={job._id} />
+        <div className="details-footer">
+          <button
+            type="button"
+            className="show-applicants-btn"
+            onClick={() => onShowApplicants(job)}
+          >
+            SHOW APPLICANTS 👥
+          </button>
         </div>
       ) : (
         <div className="details-footer">

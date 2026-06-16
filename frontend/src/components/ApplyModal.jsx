@@ -108,9 +108,19 @@ const ApplyModal = ({ job, user, onClose, onApplySuccess }) => {
       onApplySuccess();
     } catch (err) {
       console.error(err);
+      let errorMsg = "Failed to submit application. Try again.";
+      if (err.response) {
+        if (err.response.status === 413) {
+          errorMsg = "Uploaded resume file is too large. Please select a smaller file (under 10MB).";
+        } else if (err.response.data?.message) {
+          errorMsg = err.response.data.message;
+        }
+      } else if (err.request) {
+        errorMsg = "Could not reach the server. Please check if the backend is running.";
+      }
       setErrors((prev) => ({
         ...prev,
-        server: err.response?.data?.message || "Failed to submit application. Try again.",
+        server: errorMsg,
       }));
     } finally {
       setLoading(false);
